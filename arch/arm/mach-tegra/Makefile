@@ -122,6 +122,37 @@ obj-${CONFIG_MACH_TRIMSLICE}            += board-trimslice.o
 obj-${CONFIG_MACH_TRIMSLICE}            += board-trimslice-pinmux.o
 
 obj-${CONFIG_MACH_P852}                 += p852/
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-aes.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-audio.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-bootinfo.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-bt.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-camera.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-clocks.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-gps.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-gpu.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-gsm.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-i2c.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-keyboard.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-memory.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-nand.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-pinmux.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-power.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-sdhci.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-sensors.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-spi.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-touch.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-uart.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-usb.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-wdt.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle-wlan.o
+obj-${CONFIG_MACH_SHUTTLE}              += board-shuttle.o
+# Shuttle power management drivers
+obj-${CONFIG_MACH_SHUTTLE}              += shuttle-pm-bluetooth.o
+obj-${CONFIG_MACH_SHUTTLE}              += shuttle-pm-camera.o
+obj-${CONFIG_MACH_SHUTTLE}              += shuttle-pm-gps.o
+obj-${CONFIG_MACH_SHUTTLE}              += shuttle-pm-gsm.o
+obj-${CONFIG_MACH_SHUTTLE}              += shuttle-pm-wlan.o
+
 
 obj-${CONFIG_MACH_VENTANA}              += board-ventana.o
 obj-${CONFIG_MACH_VENTANA}              += board-ventana-pinmux.o
@@ -161,7 +192,7 @@ obj-${CONFIG_MACH_CARDHU}               += board-cardhu-memory.o
 obj-${CONFIG_MACH_CARDHU}               += board-cardhu-powermon.o
 
 obj-${CONFIG_MACH_KAI}                  += board-touch-kai-synaptics-spi.o
-obj-y                                   += board-touch-raydium_spi.o
+obj-${CONFIG_MACH_KAI}                  += board-touch-raydium_spi.o
 
 obj-${CONFIG_MACH_P1852}               += board-p1852.o
 obj-${CONFIG_MACH_P1852}               += board-p1852-panel.o

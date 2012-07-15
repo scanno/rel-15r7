@@ -36,7 +36,9 @@ enum tegra_usb_phy_interface {
 };
 
 /**
- * configuration structure for setting up utmi phy
+ * configuration structure for setting up utmi phyextern void tegra_otg_check_vbus_detection(void);
+extern void tegra_otg_set_host_mode(bool host_mode);
+
  */
 struct tegra_utmi_config {
 	u8 hssync_start_delay;
@@ -143,5 +145,8 @@ struct tegra_usb_otg_data {
 	struct platform_device *ehci_device;
 	struct tegra_usb_platform_data *ehci_pdata;
 };
+
+extern void tegra_otg_check_vbus_detection(void);
+extern void tegra_otg_set_host_mode(bool host_mode);
 
 #endif /* _TEGRA_USB_H_ */

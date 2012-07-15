@@ -1,10 +1,11 @@
 #
 # Makefile for regulator drivers.
 #
-GCOV_PROFILE := y
+
 
 obj-$(CONFIG_REGULATOR) += core.o dummy.o
 obj-$(CONFIG_REGULATOR_FIXED_VOLTAGE) += fixed.o
+obj-$(CONFIG_REGULATOR_VIRTUAL_ADJ_VOLTAGE) += virtual_adj.o
 obj-$(CONFIG_REGULATOR_VIRTUAL_CONSUMER) += virtual.o
 obj-$(CONFIG_REGULATOR_USERSPACE_CONSUMER) += userspace-consumer.o
 

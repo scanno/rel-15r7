@@ -1,27 +1,27 @@
-config MFD_NVEC
+config MFD_NVEC_ORG
 	bool "NV Tegra Embedded Controller SMBus Interface"
 	depends on I2C && GPIOLIB && ARCH_TEGRA
 	help
 	    Say Y here to enable support for a nVidia compliant embedded
 	    controller.
 
-config KEYBOARD_NVEC
+config KEYBOARD_NVEC_ORG
 	bool "Keyboard on nVidia compliant EC"
-	depends on MFD_NVEC
+	depends on MFD_NVEC_ORG
 	help
 	  Say Y here to enable support for a keyboard connected to 
 	  a nVidia compliant embedded controller.
 
-config SERIO_NVEC_PS2
+config SERIO_NVEC_PS2_ORG
 	bool "PS2 on nVidia EC"
-	depends on MFD_NVEC
+	depends on MFD_NVEC_ORG
 	help
 	  Say Y here to enable support for a Touchpad / Mouse connected
 	  to a nVidia compliant embedded controller.
 
-config NVEC_POWER
+config NVEC_POWER_ORG
 	bool "NVEC charger and battery"
-	depends on MFD_NVEC
+	depends on MFD_NVEC_ORG
 	help
 	  Say Y to enable support for battery and charger interface for
 	  nVidia compliant embedded controllers.

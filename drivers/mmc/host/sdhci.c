@@ -1855,9 +1855,9 @@ int sdhci_enable(struct mmc_host *mmc)
 
 	if (mmc->ios.clock) {
 		if (mmc->card->type != MMC_TYPE_SDIO) {
-			if (host->ops->set_clock)
-				host->ops->set_clock(host, mmc->ios.clock);
-			sdhci_set_clock(host, mmc->ios.clock);
+		if (host->ops->set_clock)
+			host->ops->set_clock(host, mmc->ios.clock);
+		sdhci_set_clock(host, mmc->ios.clock);
 		} else {
 			if (host->ops->set_card_clock)
 				host->ops->set_card_clock(host, mmc->ios.clock);
@@ -1876,9 +1876,9 @@ int sdhci_disable(struct mmc_host *mmc, int lazy)
 
 	/* For SDIO cards, only disable the card clock. */
 	if (mmc->card->type != MMC_TYPE_SDIO) {
-		sdhci_set_clock(host, 0);
-		if (host->ops->set_clock)
-			host->ops->set_clock(host, 0);
+	sdhci_set_clock(host, 0);
+	if (host->ops->set_clock)
+		host->ops->set_clock(host, 0);
 	} else {
 		if (host->ops->set_card_clock)
 			host->ops->set_card_clock(host, 0);
@@ -2363,6 +2363,9 @@ int sdhci_suspend_host(struct sdhci_host *host, pm_message_t state)
 		host->card_int_set = sdhci_readl(host, SDHCI_INT_ENABLE) &
 			SDHCI_INT_CARD_INT;
 
+	/* Save the original intmask to restore later */
+	host->save_intmask = sdhci_readl(host, SDHCI_INT_ENABLE);
+ 
 	sdhci_mask_irqs(host, SDHCI_INT_ALL_MASK);
 
 	if (host->vmmc)
@@ -2409,6 +2412,9 @@ int sdhci_resume_host(struct sdhci_host *host)
 	}
 
 	sdhci_enable_card_detection(host);
+
+	/* Restore the original intmask */
+	sdhci_unmask_irqs(host, host->save_intmask);
 
 	/* Set the re-tuning expiration flag */
 	if ((host->version >= SDHCI_SPEC_300) && host->tuning_count &&
@@ -2819,11 +2825,13 @@ int sdhci_add_host(struct sdhci_host *host)
 	} else {
 		mmc->max_blk_size = (caps[0] & SDHCI_MAX_BLOCK_MASK) >>
 				SDHCI_MAX_BLOCK_SHIFT;
+#ifndef CONFIG_MMC_SDHCI_NATIVE_BLOCKSIZE				
 		if (mmc->max_blk_size >= 3) {
 			printk(KERN_WARNING "%s: Invalid maximum block size, "
 				"assuming 512 bytes\n", mmc_hostname(mmc));
 			mmc->max_blk_size = 0;
 		}
+#endif
 	}
 
 	mmc->max_blk_size = 512 << mmc->max_blk_size;
@@ -2833,6 +2841,12 @@ int sdhci_add_host(struct sdhci_host *host)
 	 */
 	mmc->max_blk_count = (host->quirks & SDHCI_QUIRK_NO_MULTIBLOCK) ? 1 : 65535;
 
+#ifdef CONFIG_MMC_SDHCI_NATIVE_BLOCKSIZE
+	printk(KERN_INFO "%s: mss %u mrs %u mbs %u mbc %u\n", mmc_hostname(mmc),
+		mmc->max_seg_size, mmc->max_req_size, mmc->max_blk_size,
+		mmc->max_blk_count);
+#endif
+	
 	/*
 	 * Init tasklets.
 	 */
