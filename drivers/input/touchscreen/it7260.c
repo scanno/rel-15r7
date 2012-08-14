@@ -586,6 +586,57 @@ static int it7260_get_2d_resolution(struct it7260_ts_data *ts,unsigned int *xres
 }
 		
 
+// Reset the touchscreen
+static void it7260_ts_reset(struct it7260_ts_data *ts)
+{
+	int ctr = 50,cycles=10;
+	unsigned char status = 0;
+	int gpio = irq_to_gpio(ts->client->irq);
+	if (!gpio_is_valid(gpio))
+		return;
+	
+	while (1) {
+	
+		// Start resetting the controller
+		gpio_direction_output(gpio,  0); // Reset	
+		msleep(10);
+
+		// Try to read status
+		if (it7260_read_query_buffer(ts,&status) >= 0) 
+			break;
+		
+		// Humm... Device not responding... Wait with timeout until it answers...
+		if (--ctr > 0)
+			continue;
+			
+		// We tried 50 times and no success... Try a power cycle...
+		ctr = 50;
+		
+		// If we tried 10 power cycles, then the controller is not responding...
+		if (--cycles == 0) {
+			dev_err(&ts->client->dev,"IT7260 not responding\n");		
+			break;
+		}
+		
+		// Disable the touchpad
+		if (ts->disable_tp)
+			ts->disable_tp();
+					
+		msleep(50);
+			
+		// Enable the touchpad
+		if (ts->enable_tp)
+			ts->enable_tp();
+
+		msleep(500);
+	};
+	
+	msleep(10);
+	gpio_set_value(gpio, 1);
+	msleep(50);
+	
+	gpio_direction_input(gpio);
+}
 
 static int it7260_flush(struct it7260_ts_data *ts)
 {
@@ -630,7 +681,7 @@ static int it7260_flush(struct it7260_ts_data *ts)
 }
 
 
-static int it7260_init(struct it7260_ts_data *ts)
+static int it7260_init(struct it7260_ts_data *ts,bool shouldrecalibrate)
 {
 	unsigned char id[6];
 	unsigned char fwVer[4], cfgVer[4];
@@ -701,8 +752,10 @@ static int it7260_init(struct it7260_ts_data *ts)
 
 	dev_info(&ts->client->dev,"Resolution: X:%d , Y:%d\n", ts->xres, ts->yres);
 
-	// Recalibrate it
-	it7260_recalibrate_cap_sensor(ts);
+	// Recalibrate it if required...
+	if (shouldrecalibrate) {
+		it7260_recalibrate_cap_sensor(ts);
+	}
 	
 	return 0;
 }
@@ -1061,7 +1114,7 @@ static void update_3_fingers(struct it7260_ts_data *ts,struct ts_rawpt* p /*[3]*
 	}
 }
 
-static void it7260_readpoints(struct it7260_ts_data *ts)
+static int it7260_readpoints(struct it7260_ts_data *ts)
 {
 	unsigned char ucQuery = 0;
 	unsigned char pucPoint[14];
@@ -1071,7 +1124,7 @@ static void it7260_readpoints(struct it7260_ts_data *ts)
 	int idx = 0;
 
 	// If error
-	if(it7260_read_query_buffer(ts,&ucQuery)<0) {
+	if((ret = it7260_read_query_buffer(ts,&ucQuery)) < 0) {
 		dev_err(&ts->client->dev,"failed to read points [1]\n");
 		goto exit;
 	}
@@ -1083,10 +1136,7 @@ static void it7260_readpoints(struct it7260_ts_data *ts)
 	}
 	
 	// Query point data
-	ret = it7260_read_point_buffer(ts,pucPoint);
-
-	// If error...
-	if(ret < 0)
+	if((ret = it7260_read_point_buffer(ts,pucPoint)) < 0)
 	{
 		dev_err(&ts->client->dev,"failed to read points [2]\n");
 		goto exit;
@@ -1198,15 +1248,49 @@ static void it7260_readpoints(struct it7260_ts_data *ts)
 		input_sync(ts->input_dev);	
 	} 
 
+	// Success
+	ret = 0;
+	
 exit:	
 	if (ts->use_irq)
 		enable_irq(ts->client->irq);
+		
+	return ret;
 }
 
 static void it7260_ts_work_func(struct work_struct *work)
 {
 	struct it7260_ts_data *ts = container_of(work, struct it7260_ts_data, work);
-	it7260_readpoints(ts);
+	
+	int reinittries = 3;
+	do {
+		
+		// Retry the read process 20 times at maximum if it fails..
+		int tries = 20;
+		while (it7260_readpoints(ts) < 0 && --tries > 0);
+		
+		// If succeeded, we are done!
+		if (tries > 0)
+			break;
+			
+		dev_info(&ts->client->dev,"Touchscreen died. Reinitializing it hoping to recover it\n");
+		
+		// Reset the touchscreen controller
+		it7260_ts_reset(ts);
+
+		// And reinit it
+		it7260_init(ts,false);
+
+		// Enable interrupts, if being used
+		if (ts->use_irq) {
+			it7260_enable_interrupts(ts);
+		}
+
+	} while (--reinittries > 0);
+	
+	if (reinittries <= 0) {
+		dev_err(&ts->client->dev,"Touchscreen died and unable to recover it. Touchscreen functionality lost\n");
+	}
 }
 
 static enum hrtimer_restart it7260_ts_timer_func(struct hrtimer *timer)
@@ -1453,7 +1537,7 @@ static long ite7260_fwmode_ioctl(struct file *file, unsigned int cmd, unsigned l
         if (!memcmp(&(buffer[1]), ext, sizeof(ext))) {
 	        dev_info(&ts->client->dev,"Enabling Touchscreen functionality.\n");
 			ts->fw_upgrade_mode = false;
-			it7260_init(ts);
+			it7260_init(ts,false);
 			if (!ts->fw_upgrade_mode)
 				it7260_register_irq_handler(ts);
         }
@@ -1517,59 +1601,6 @@ static struct miscdevice ite7260_fwmode_device = {
 	.fops = &ite7260_fwmode_fops,
 };
 
-// Reset the touchscreen
-static void it7260_ts_reset(struct it7260_ts_data *ts)
-{
-	int ctr = 50,cycles=10;
-	unsigned char status = 0;
-	int gpio = irq_to_gpio(ts->client->irq);
-	if (!gpio_is_valid(gpio))
-		return;
-	
-	while (1) {
-	
-		// Start resetting the controller
-		gpio_direction_output(gpio,  0); // Reset	
-		msleep(10);
-
-		// Try to read status
-		if (it7260_read_query_buffer(ts,&status) >= 0) 
-			break;
-		
-		// Humm... Device not responding... Wait with timeout until it answers...
-		if (--ctr > 0)
-			continue;
-			
-		// We tried 50 times and no success... Try a power cycle...
-		ctr = 50;
-		
-		// If we tried 10 power cycles, then the controller is not responding...
-		if (--cycles == 0) {
-			dev_err(&ts->client->dev,"IT7260 not responding\n");		
-			break;
-		}
-		
-		// Disable the touchpad
-		if (ts->disable_tp)
-			ts->disable_tp();
-					
-		msleep(50);
-			
-		// Enable the touchpad
-		if (ts->enable_tp)
-			ts->enable_tp();
-
-		msleep(500);
-	};
-	
-	msleep(10);
-	gpio_set_value(gpio, 1);
-	msleep(50);
-	
-	gpio_direction_input(gpio);
-}
-
-
 ///////////////////////////////////////////////////////////////////////////////////////
 static int it7260_ts_probe(
 	struct i2c_client *client, const struct i2c_device_id *id)
@@ -1621,7 +1652,7 @@ static int it7260_ts_probe(
 	it7260_ts_reset(ts);
 		
 	// Try to init the capacitive sensor
-	if(it7260_init(ts)) {
+	if(it7260_init(ts,true)) {
 		dev_err(&client->dev,"not detected or in firmware upgrade mode.\n");
 		ret = -ENODEV;
 		goto error_not_found;

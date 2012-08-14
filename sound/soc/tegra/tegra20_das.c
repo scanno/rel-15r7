@@ -95,8 +95,6 @@ int tegra20_das_set_tristate(int dap_id, int is_tristate)
 		tristate = TEGRA_TRI_NORMAL;
 
 	tegra_pinmux_set_tristate(pin, tristate);
-	
-	return 0;
 }
 EXPORT_SYMBOL_GPL(tegra20_das_set_tristate);
 

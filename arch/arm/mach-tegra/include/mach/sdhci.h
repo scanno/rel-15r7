@@ -30,12 +30,12 @@
 
 struct tegra_sdhci_platform_data {
 	int cd_gpio;
+	int cd_gpio_active_high;
 	int wp_gpio;
 	int power_gpio;
 	int is_8bit;
 	int pm_flags;
 	int pm_caps;
-	int cd_gpio_active_high;
 	unsigned int max_clk_limit;
 	unsigned int ddr_clk_limit;
 	unsigned int tap_delay;
