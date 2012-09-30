@@ -659,7 +659,7 @@ static struct tegra_suspend_platform_data shuttle_suspend_data = { /*ok*/
 	 */
 	.cpu_timer	= 5000,
 	.cpu_off_timer	= 5000,
-	.suspend_mode	= TEGRA_SUSPEND_LP0,
+	.suspend_mode	= TEGRA_SUSPEND_LP1,
 	.core_timer	= 0x7e7e,
 	.core_off_timer = 0x7f,
 	.corereq_high	= false,
