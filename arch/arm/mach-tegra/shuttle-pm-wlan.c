@@ -231,7 +231,10 @@ static int __init shuttle_wlan_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 	dev_set_drvdata(&pdev->dev, wlan_data);
-
+	
+	/* Lets keep the Wlan adapter powered on to support WoW */
+	wlan_data->keep_on_in_suspend = 1;
+	
 	ret = shuttle_wlan_bt_init();
 	if (ret) {
 		dev_err(&pdev->dev, "unable to init wlan/bt module\n");

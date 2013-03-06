@@ -202,6 +202,7 @@ static int __init shuttle_bt_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 	dev_set_drvdata(&pdev->dev, bt_data);
+	bt_data->keep_on_in_suspend = 1;
 
 	ret = shuttle_wlan_bt_init();
 	if (ret) {

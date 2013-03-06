@@ -77,9 +77,7 @@ struct tegra_sdhci_platform_data shuttle_wlan_data = {
 		.built_in = 1,
 		.ocr_mask = MMC_OCR_1V8_MASK,
 	},
-#ifndef CONFIG_MMC_EMBEDDED_SDIO
-	.pm_flags = MMC_PM_KEEP_POWER,
-#endif	
+	.pm_flags = MMC_PM_KEEP_POWER, /* To support WoW */
 	.cd_gpio = -1,
 	.wp_gpio = -1,
 	.power_gpio = -1,

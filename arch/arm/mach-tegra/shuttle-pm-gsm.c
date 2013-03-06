@@ -198,6 +198,7 @@ static int __init shuttle_gsm_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 	dev_set_drvdata(&pdev->dev, gsm_data);
+	gsm_data->keep_on_in_suspend = 1;
 
 	ret = shuttle_3g_gps_init();
 	if (ret) {

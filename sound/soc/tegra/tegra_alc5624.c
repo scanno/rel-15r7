@@ -169,6 +169,7 @@ static int tegra_alc5624_hw_params(struct snd_pcm_substream *substream,
 	else
 		dai_flag |= SND_SOC_DAIFMT_CBS_CFS;
 
+	dev_dbg(card->dev,"%s(): dai_flag:%x\n", __FUNCTION__,dai_flag);		
 	dev_dbg(card->dev,"%s(): format: 0x%08x, channels:%d, srate:%d\n", __FUNCTION__,
 		params_format(params),params_channels(params),params_rate(params));
 
@@ -280,12 +281,8 @@ static int tegra_bt_sco_hw_params(struct snd_pcm_substream *substream,
 		return err;
 	}
 
-	/* Bluetooth Codec is always slave here */
-	err = snd_soc_dai_set_fmt(codec_dai, dai_flag);
-	if (err < 0) {
-		dev_err(card->dev,"codec_dai fmt not set \n");
-		return err;
-	}
+	/* Bluetooth Codec is always master here - Do not check return value, as is meaningless with spdif-dit */
+	snd_soc_dai_set_fmt(codec_dai, dai_flag);
 	
 	/* Get system clock */
 	srate = params_rate(params);
