@@ -69,7 +69,7 @@
 #define ALC5624_MISC_CTRL				0x5E	/* MISC CONTROL */
 #define	ALC5624_STEREO_DAC_CLK_CTRL1	0x60	/* STEREO DAC CLOCK CONTROL 1 */
 #define ALC5624_STEREO_DAC_CLK_CTRL2	0x62	/* STEREO DAC CLOCK CONTROL 2 */
-#define ALC5624_PSEUDO_SPATIAL_CTRL		0x68	/* PSEDUEO STEREO /SPATIAL EFFECT BLOCK CONTROL */
+#define ALC5624_PSEUDO_SPATIAL_CTRL		0x68	/* PSEUDO STEREO /SPATIAL EFFECT BLOCK CONTROL */
 #define ALC5624_INDEX_ADDRESS			0x6A	/* INDEX ADDRESS */
 #define ALC5624_INDEX_DATA				0x6C	/* INDEX DATA  */
 #define ALC5624_EQ_STATUS				0x6E	/* EQ STATUS */
@@ -535,13 +535,6 @@
 /* codec private data */
 struct alc5624_priv {
 
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)
-	/* Older versions of ALSA SoC require from us to hold the register
-	   cache ourselves and a codec reference */
-	struct snd_soc_codec codec;
-	u16 reg_cache[REGISTER_COUNT];
-#endif
-	struct clk* 	mclk;			/* the master clock */
 	unsigned int	avdd_mv;		/* Analog vdd in millivolts */
 	unsigned int	spkvdd_mv;		/* Speaker Vdd in millivolts */
 	unsigned int	hpvdd_mv;		/* Headphone Vdd in millivolts */
@@ -562,6 +555,8 @@ struct alc5624_priv {
 	int 			streams_running;/* Streams running ALC5624_STREAM_* */
 	int 			using_pll;		/* If using PLL */
 	
+	int 			eq_setting;		/* Equalizer setting */
+	
 	/* original R/W functions */
 	unsigned int (*bus_hw_read)(struct snd_soc_codec *codec, unsigned int reg);
 	int (*bus_hw_write)(void*,const char*, int);  /* codec->control_data(->struct i2c_client), pdata, datalen */
@@ -569,67 +564,155 @@ struct alc5624_priv {
 };
 
 
-static const struct {
-	u16 reg;	/* register */
-	u16 val;	/* value */
-} alc5624_reg_default[] = {
-	{ALC5624_SPK_OUT_VOL				, 0x4040 }, /* Unmute left and right channels, enable 0 cross detector, 0db volume */
-	{ALC5624_HP_OUT_VOL					, 0x4040 }, /* Unmute left and right channels, enable 0 cross detector, 0db volume */
-	{ALC5624_PHONEIN_MONO_OUT_VOL		, 0xDFDF }, /* Phone input muted, Mono output muted */
-	{ALC5624_LINE_IN_VOL				, 0xFF1F }, /* Mute Line In volume */
-	{ALC5624_STEREO_DAC_VOL				, 0x6808 }, /* Mute volume output to Mono and Speaker */
-	{ALC5624_MIC_VOL					, 0x0000 }, /* Mic volume = +12db gain */
-	{ALC5624_MIC_ROUTING_CTRL			, 0xF0F0 }, /* Mute mic volume to Headphone, Speaker and Mono mixers, Differential mode enabled */
-	{ALC5624_ADC_REC_GAIN				, 0xF58B },
-	{ALC5624_ADC_REC_MIXER				, 0x3F3F }, /* Mic1 as recording sources - will be overriden on init */
-	{ALC5624_OUTPUT_MIXER_CTRL			, 0x6B00 }, /* SPKL from HP mixer, Class D amplifier, SPKR from HP mixer, HPL from headphone mixer, HPR from headphone mixer, Mono from VMid */
-	{ALC5624_MIC_CTRL					, 0x0A02 }, /* 1.8uA short current det, Bias volt =0.9Avdd, +30db gain boost */
-	{ALC5624_PD_CTRL_STAT				, 0x0000 }, /* No powerdown */
-	{ALC5624_MAIN_SDP_CTRL				, 0x8000 }, /* Slave interfase */
-	{ALC5624_PWR_MANAG_ADD1				, 0x003C }, /* Nothing powered down, except I2S interface, and main references */
-	{ALC5624_PWR_MANAG_ADD2				, 0x07FF }, /* Nothing powered down, except class AB amplifier */
-	{ALC5624_PWR_MANAG_ADD3				, 0x4CFF }, /* Nothing powered down, except class AB/D amplifiers*/
-	{ALC5624_GEN_CTRL_REG1				, 0x00E8 }, /* 1v as Vmid for all amps (overrided later using platform data) */
-	{ALC5624_GEN_CTRL_REG2				, 0x0000 }, /* Class AB differential mode */
-	{ALC5624_PLL_CTRL					, 0x0000 },
-	{ALC5624_GPIO_PIN_CONFIG			, 0x2E3E }, /* All GPIOs as input */
-	{ALC5624_GPIO_PIN_POLARITY			, 0x2E3E }, /* All GPIOs high active */
-	{ALC5624_GPIO_PIN_STICKY			, 0x0000 }, /* No sticky ops */
-	{ALC5624_GPIO_PIN_WAKEUP			, 0x0000 }, /* No wakeups */
-	{ALC5624_GPIO_PIN_SHARING			, 0x0000 },
-	{ALC5624_GPIO_OUT_CTRL				, 0x0000 },
-	{ALC5624_MISC_CTRL					, 0x8000 }, /* Slow Vref, Strong amp, No AVC, thermal shutdown disabled - overridable by platform data */
-	{ALC5624_STEREO_DAC_CLK_CTRL1		, 0x3075 },
-	{ALC5624_STEREO_DAC_CLK_CTRL2		, 0x1010 },
-	{ALC5624_PSEUDO_SPATIAL_CTRL		, 0x0053 }, /* Disable */
-	{VIRTUAL_HPL_MIXER					, 0x0001 },
-	{VIRTUAL_HPR_MIXER					, 0x0001 },
-	{VIRTUAL_IDX_EQ_BAND0_COEFF			, 0x1b1b },
-	{VIRTUAL_IDX_EQ_BAND0_GAIN 			, 0xf510 },
-	{VIRTUAL_IDX_EQ_BAND1_COEFF0		, 0xc10f },
-	{VIRTUAL_IDX_EQ_BAND1_COEFF1		, 0x1ef6 },
-	{VIRTUAL_IDX_EQ_BAND1_GAIN 			, 0xf65f },
-	{VIRTUAL_IDX_EQ_BAND2_COEFF0 		, 0xc159 },
-	{VIRTUAL_IDX_EQ_BAND2_COEFF1 		, 0x1eb3 },
-	{VIRTUAL_IDX_EQ_BAND2_GAIN 			, 0xf510 },
-	{VIRTUAL_IDX_EQ_BAND3_COEFF0 		, 0xc386 },
-	{VIRTUAL_IDX_EQ_BAND3_COEFF1 		, 0x1cd0 },
-	{VIRTUAL_IDX_EQ_BAND3_GAIN 			, 0x0adc },
-	{VIRTUAL_IDX_EQ_BAND4_COEFF 		, 0x0436 },
-	{VIRTUAL_IDX_EQ_BAND4_GAIN 			, 0x2298 },
-	{VIRTUAL_IDX_EQ_CTRL_STAT 			, 0x0000 }, /* Disable Equalizer */
-	{VIRTUAL_IDX_EQ_INPUT_VOL 			, 0x0000 }, /* 0db */
-	{VIRTUAL_IDX_EQ_OUTPUT_VOL 			, 0x0001 }, /* 0db */
-	{VIRTUAL_IDX_AUTO_VOL_CTRL0 		, 0x0050 },
-	{VIRTUAL_IDX_AUTO_VOL_CTRL1 		, 0x2710 },
-	{VIRTUAL_IDX_AUTO_VOL_CTRL2 		, 0x0BB8 },
-	{VIRTUAL_IDX_AUTO_VOL_CTRL3 		, 0x01F4 },
-	{VIRTUAL_IDX_AUTO_VOL_CTRL4 		, 0x0190 },
-	{VIRTUAL_IDX_AUTO_VOL_CTRL5 		, 0x0200 },
-	{VIRTUAL_IDX_DIG_INTERNAL 			, 0x9000 }, /* Strong drive */
-	{VIRTUAL_IDX_CLASS_D_TEMP_SENSOR 	, 0x5555 }, /* 95deg max */
-	{VIRTUAL_IDX_AD_DA_MIXER_INTERNAL	, 0xE184 },
+static const u16 alc5624_reg_default[REGISTER_COUNT] = {
+	[ALC5624_SPK_OUT_VOL				] = 0x4040 , /* Unmute left and right channels] = enable 0 cross detector] = 0db volume */
+	[ALC5624_HP_OUT_VOL					] = 0x4040 , /* Unmute left and right channels] = enable 0 cross detector] = 0db volume */
+	[ALC5624_PHONEIN_MONO_OUT_VOL		] = 0xDFDF , /* Phone input muted] = Mono output muted */
+	[ALC5624_LINE_IN_VOL				] = 0xFF1F , /* Mute Line In volume */
+	[ALC5624_STEREO_DAC_VOL				] = 0x6808 , /* Mute volume output to Mono and Speaker */
+	[ALC5624_MIC_VOL					] = 0x0000 , /* Mic volume = +12db gain */
+	[ALC5624_MIC_ROUTING_CTRL			] = 0xF0F0 , /* Mute mic volume to Headphone] = Speaker and Mono mixers] = Differential mode enabled */
+	[ALC5624_ADC_REC_GAIN				] = 0xF58B ,
+	[ALC5624_ADC_REC_MIXER				] = 0x3F3F , /* Mic1 as recording sources - will be overriden on init */
+	[ALC5624_OUTPUT_MIXER_CTRL			] = 0x6B00 , /* SPKL from HP mixer] = Class D amplifier] = SPKR from HP mixer] = HPL from headphone mixer] = HPR from headphone mixer] = Mono from VMid */
+	[ALC5624_MIC_CTRL					] = 0x0A02 , /* 1.8uA short current det] = Bias volt =0.9Avdd] = +30db gain boost */
+	[ALC5624_PD_CTRL_STAT				] = 0x0000 , /* No powerdown */
+	[ALC5624_MAIN_SDP_CTRL				] = 0x8000 , /* Slave interfase */
+	[ALC5624_PWR_MANAG_ADD1				] = 0x003C , /* Nothing powered down] = except I2S interface] = and main references */
+	[ALC5624_PWR_MANAG_ADD2				] = 0x07FF , /* Nothing powered down] = except class AB amplifier */
+	[ALC5624_PWR_MANAG_ADD3				] = 0x4CFF , /* Nothing powered down] = except class AB/D amplifiers*/
+	[ALC5624_GEN_CTRL_REG1				] = 0x00E8 , /* 1v as Vmid for all amps (overrided later using platform data) */
+	[ALC5624_GEN_CTRL_REG2				] = 0x0000 , /* Class AB differential mode */
+	[ALC5624_PLL_CTRL					] = 0x0000 ,
+	[ALC5624_GPIO_PIN_CONFIG			] = 0x2E3E , /* All GPIOs as input */
+	[ALC5624_GPIO_PIN_POLARITY			] = 0x2E3E , /* All GPIOs high active */
+	[ALC5624_GPIO_PIN_STICKY			] = 0x0000 , /* No sticky ops */
+	[ALC5624_GPIO_PIN_WAKEUP			] = 0x0000 , /* No wakeups */
+	[ALC5624_GPIO_PIN_SHARING			] = 0x0000 ,
+	[ALC5624_GPIO_OUT_CTRL				] = 0x0000 ,
+	[ALC5624_MISC_CTRL					] = 0x8000 , /* Slow Vref] = Strong amp] = No AVC] = thermal shutdown disabled - overridable by platform data */
+	[ALC5624_STEREO_DAC_CLK_CTRL1		] = 0x3075 ,
+	[ALC5624_STEREO_DAC_CLK_CTRL2		] = 0x1010 ,
+	[ALC5624_PSEUDO_SPATIAL_CTRL		] = 0x0053 , /* Disable */
+	[VIRTUAL_HPL_MIXER					] = 0x0001 ,
+	[VIRTUAL_HPR_MIXER					] = 0x0001 ,
+	[VIRTUAL_IDX_EQ_BAND0_COEFF			] = 0x1b1b ,
+	[VIRTUAL_IDX_EQ_BAND0_GAIN 			] = 0xf510 ,
+	[VIRTUAL_IDX_EQ_BAND1_COEFF0		] = 0xc10f ,
+	[VIRTUAL_IDX_EQ_BAND1_COEFF1		] = 0x1ef6 ,
+	[VIRTUAL_IDX_EQ_BAND1_GAIN 			] = 0xf65f ,
+	[VIRTUAL_IDX_EQ_BAND2_COEFF0 		] = 0xc159 ,
+	[VIRTUAL_IDX_EQ_BAND2_COEFF1 		] = 0x1eb3 ,
+	[VIRTUAL_IDX_EQ_BAND2_GAIN 			] = 0xf510 ,
+	[VIRTUAL_IDX_EQ_BAND3_COEFF0 		] = 0xc386 ,
+	[VIRTUAL_IDX_EQ_BAND3_COEFF1 		] = 0x1cd0 ,
+	[VIRTUAL_IDX_EQ_BAND3_GAIN 			] = 0x0adc ,
+	[VIRTUAL_IDX_EQ_BAND4_COEFF 		] = 0x0436 ,
+	[VIRTUAL_IDX_EQ_BAND4_GAIN 			] = 0x2298 ,
+	[VIRTUAL_IDX_EQ_CTRL_STAT 			] = 0x0000 , /* Disable Equalizer */
+	[VIRTUAL_IDX_EQ_INPUT_VOL 			] = 0x0000 , /* 0db */
+	[VIRTUAL_IDX_EQ_OUTPUT_VOL 			] = 0x0001 , /* 0db */
+	[VIRTUAL_IDX_AUTO_VOL_CTRL0 		] = 0x0050 ,
+	[VIRTUAL_IDX_AUTO_VOL_CTRL1 		] = 0x2710 ,
+	[VIRTUAL_IDX_AUTO_VOL_CTRL2 		] = 0x0BB8 ,
+	[VIRTUAL_IDX_AUTO_VOL_CTRL3 		] = 0x01F4 ,
+	[VIRTUAL_IDX_AUTO_VOL_CTRL4 		] = 0x0190 ,
+	[VIRTUAL_IDX_AUTO_VOL_CTRL5 		] = 0x0200 ,
+	[VIRTUAL_IDX_DIG_INTERNAL 			] = 0x9000 , /* Strong drive */
+	[VIRTUAL_IDX_CLASS_D_TEMP_SENSOR 	] = 0x5555 , /* 95deg max */
+	[VIRTUAL_IDX_AD_DA_MIXER_INTERNAL	] = 0xE184 ,
 };
+
+//*************************************************************************************************
+//EQ parameter
+//*************************************************************************************************
+enum {
+	NORMAL=0,
+	CLUB,
+	DANCE,
+	LIVE,
+	POP,
+	ROCK,
+	OPPO,
+	TREBLE,
+	BASS
+};
+
+typedef struct  _HW_EQ_PRESET
+{
+	u16 HwEqType;
+	u16 EqValue[22];
+	u16 HwEQCtrl;
+	u16 EqInVol;
+	u16 EqOutVol;
+} HW_EQ_PRESET;
+
+static const HW_EQ_PRESET HwEq_Preset[] = {
+    /*			0x0		0x1		0x2	  0x3	0x4		0x5		0x6		0x7	0x8		0x9		0xa	0xb		0xc		0xd		0xe		0xf	 	0x6e*/
+	{NORMAL		,{0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000},0x0000, 0x0000, 0x0003},
+	{CLUB  		,{0x1C10,0x0000,0xC1CC,0x1E5D,0x0699,0xCD48,0x188D,0x0699,0xC3B6,0x1CD0,0x0699,0x0436,0x0000,0x0000,0x0000,0x0000},0x000E, 0x0000, 0x0003},
+	{DANCE 		,{0x1F2C,0x095B,0xC071,0x1F95,0x0616,0xC96E,0x1B11,0xFC91,0xDCF2,0x1194,0xFAF2,0x0436,0x0000,0x0000,0x0000,0x0000},0x000F, 0x0000, 0x0003},
+	{LIVE  		,{0x1EB5,0xFCB6,0xC24A,0x1DF8,0x0E7C,0xC883,0x1C10,0x0699,0xDA41,0x1561,0x0295,0x0436,0x0000,0x0000,0x0000,0x0000},0x000F, 0x0000, 0x0003},
+	{POP   		,{0x1EB5,0xFCB6,0xC1D4,0x1E5D,0x0E23,0xD92E,0x16E6,0xFCB6,0x0000,0x0969,0xF988,0x0436,0x0000,0x0000,0x0000,0x0000},0x000F, 0x0000, 0x0003},
+	{ROCK  		,{0x1EB5,0xFCB6,0xC071,0x1F95,0x0424,0xC30A,0x1D27,0xF900,0x0C5D,0x0FC7,0x0E23,0x0436,0x0000,0x0000,0x0000,0x0000},0x000F, 0x0000, 0x0003},
+	{OPPO  		,{0x0000,0x0000,0xCA4A,0x17F8,0x0FEC,0xCA4A,0x17F8,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000},0x000F, 0x0000, 0x0003},
+	{TREBLE		,{0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x188D,0x1699,0x0000,0x0000,0x0000},0x0010, 0x0000, 0x0003},
+	{BASS  		,{0x1A43,0x0C00,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000},0x0001, 0x0000, 0x0003},
+};  
+
+/*
+ * for EQ function
+ */
+static void alc5624_update_eqmode(struct snd_soc_codec *codec, int mode)
+{
+	u16 i=0;
+
+	if( mode == NORMAL )
+	{
+		snd_soc_write(codec, VIRTUAL_IDX_EQ_CTRL_STAT, 0x0000);	/* disable Hardware LP,BP1,BP2,BP3,HP1,HP2 block Control */
+		
+		/* clear EQ parameter */
+		for( i=0; i <= 0x0f; i++)
+			snd_soc_write(codec, i+VIRTUAL_IDX_EQ_BAND0_COEFF, HwEq_Preset[mode].EqValue[i]);
+
+		snd_soc_write(codec, VIRTUAL_IDX_EQ_CTRL_STAT, 0x0000);	/* disable Hardware LP,BP1,BP2,BP3,HP1,HP2 block Control */
+	}
+	else
+	{
+		snd_soc_write(codec, VIRTUAL_IDX_EQ_CTRL_STAT, HwEq_Preset[mode].HwEQCtrl);
+
+		/* Fill EQ parameter */
+		for( i=0; i <= 0x0f; i++)
+			snd_soc_write(codec, i+VIRTUAL_IDX_EQ_BAND0_COEFF, HwEq_Preset[mode].EqValue[i]);
+
+		/* update EQ parameter */
+		snd_soc_write(codec, VIRTUAL_IDX_EQ_INPUT_VOL, HwEq_Preset[mode].EqInVol); 		/* set EQ input volume */
+		snd_soc_write(codec, VIRTUAL_IDX_EQ_OUTPUT_VOL, HwEq_Preset[mode].EqOutVol); 	/* set EQ output volume */
+		snd_soc_update_bits(codec, VIRTUAL_IDX_EQ_CTRL_STAT, 0x8000, 0x8000);			/* Enable equalizer */
+	}
+} 
+
+static int alc5624_eq_sel_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct alc5624_priv *alc5624 = snd_soc_codec_get_drvdata(codec);
+	
+	dev_dbg(codec->dev,"alc5624_eq_sel_put = %ld\n",ucontrol->value.integer.value[0]);
+
+	alc5624_update_eqmode(codec, ucontrol->value.enumerated.item[0]);
+	alc5624->eq_setting = ucontrol->value.enumerated.item[0];
+	
+	return 0;
+} 
+
+static int alc5624_eq_sel_get(struct snd_kcontrol *kcontrol,	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct alc5624_priv *alc5624 = snd_soc_codec_get_drvdata(codec);
+	
+	ucontrol->value.enumerated.item[0] = alc5624->eq_setting;
+	return 0;
+}
 
 /*
  * ALC5624 Controls
@@ -662,6 +745,11 @@ static const struct soc_enum alc5624_amp_type_enum[] = {
 SOC_ENUM_SINGLE(ALC5624_OUTPUT_MIXER_CTRL,12, 2, alc5624_amp_type_sel), /*Speaker AMP sel 7 */
 };
 
+/* Equalizer */
+static const char *alc5624_eq_sel[] = {"normal", "club", "dance", "live",
+                        "pop", "rock", "oppo", "treble","bass"};
+static const SOC_ENUM_SINGLE_EXT_DECL( alc5624_eq_enum, alc5624_eq_sel);
+
 static const struct snd_kcontrol_new alc5624_snd_controls[] = {
 SOC_DOUBLE_TLV("Speaker Playback Volume", 	ALC5624_SPK_OUT_VOL, 8, 0, 31, 1, spkhpmonooutvol_tlv),	
 SOC_DOUBLE("Speaker Playback Switch", 		ALC5624_SPK_OUT_VOL, 15, 7, 1, 1),
@@ -679,6 +767,7 @@ SOC_SINGLE_TLV("Mic 1 Boost Volume",		ALC5624_MIC_CTRL, 10, 3, 0, micboost_tlv),
 SOC_SINGLE_TLV("Mic 2 Boost Volume",		ALC5624_MIC_CTRL, 8, 3, 0, micboost_tlv),
 SOC_ENUM("Speaker Amp Type",				alc5624_amp_type_enum[0]),
 SOC_DOUBLE_TLV("Rec Capture Volume", 		ALC5624_ADC_REC_GAIN, 7, 0, 31, 0, capvol_tlv),
+SOC_ENUM_EXT("EQ Mode", alc5624_eq_enum, alc5624_eq_sel_get, alc5624_eq_sel_put),
 	};
 
 /*
@@ -926,7 +1015,7 @@ SND_SOC_DAPM_INPUT("MIC2"),
 SND_SOC_DAPM_VMID("VMID"),
 };
 
-static const struct snd_soc_dapm_route audio_map[] = {
+static const struct snd_soc_dapm_route alc5624_dapm_routes[] = {
 	/* virtual mixer - mixes left & right channels for spk and mono mixers */
 	{"I2S Mixer", NULL, "Left DAC"},
 	{"I2S Mixer", NULL, "Right DAC"},
@@ -1044,12 +1133,7 @@ static int alc5624_dai_startup(struct snd_pcm_substream *substream,
 	int is_play = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	struct snd_soc_codec *codec = dai->codec;
 	struct alc5624_priv *alc5624 = snd_soc_codec_get_drvdata(codec);
-	
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 	enum snd_soc_bias_level level = codec->dapm.bias_level;
-#else
-	enum snd_soc_bias_level level = codec->bias_level;
-#endif
 	
 	dev_dbg(codec->dev, "%s(): is_play:%d, bias level:%d\n", __FUNCTION__,is_play, level);
 	
@@ -1097,12 +1181,7 @@ static void alc5624_dai_shutdown(struct snd_pcm_substream *substream,
 	int is_play = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	struct snd_soc_codec *codec = dai->codec;
 	struct alc5624_priv *alc5624 = snd_soc_codec_get_drvdata(codec);
-
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 	enum snd_soc_bias_level level = codec->dapm.bias_level;
-#else
-	enum snd_soc_bias_level level = codec->bias_level;
-#endif
 	
 	dev_dbg(codec->dev, "%s(): is_play:%d, bias level: %d\n", __FUNCTION__,is_play, level);	
 	
@@ -1499,15 +1578,10 @@ static int alc5624_pcm_hw_params(struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)
-	struct snd_soc_device *socdev = rtd->socdev;
-	struct snd_soc_codec *codec = socdev->card->codec;
-#else	
 	struct snd_soc_codec *codec = rtd->codec;
-#endif
 	struct alc5624_priv *alc5624 = snd_soc_codec_get_drvdata(codec);
 	
-	u16 iface=snd_soc_read(codec,ALC5624_MAIN_SDP_CTRL)&0xfff3;
+	u16 iface = snd_soc_read(codec,ALC5624_MAIN_SDP_CTRL)&0xfff3;
 	int coeff = get_coeff(alc5624->sysclk, params_rate(params));
 
 	dev_dbg(codec->dev, "%s(): format: 0x%08x\n", __FUNCTION__,params_format(params));	
@@ -1626,27 +1700,25 @@ static int alc5624_hw_write(void* control_data,const char* data_in_s,int len)
 	return -EIO;
 }
 
+/* forward declaration */
+static int alc5624_readable_register(struct snd_soc_codec *codec, unsigned int reg);
 
 /* Sync reg_cache with the hardware - But skip the RESET address */
 static void alc5624_sync_cache(struct snd_soc_codec *codec)
 {
 	/*struct alc5624_priv *alc5624 = snd_soc_codec_get_drvdata(codec);*/
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)
-	int i, step = 1, size = REGISTER_COUNT;
-#else
-	int i, step = codec->driver->reg_cache_step, size = codec->driver->reg_cache_size;
-#endif
+	unsigned int i, step = codec->driver->reg_cache_step, size = codec->driver->reg_cache_size;
 	u16 *cache = codec->reg_cache;
 	u8 data[3];
 
 	pr_debug("%s: Synchronizing codec regs to cache\n",__FUNCTION__);
 	
 	/* Sync back cached values if they're different from the
-	 * hardware default.
+	 * hardware default - And skip the reset register
 	 */
 	for (i = 2 ; i < size ; i += step) {
-		/* Skip non implemented registers if non virtual */
-		if ((i & 1) && i < VIRTUAL_REG_FIRST)
+		/* Skip non implemented registers... */
+		if (!alc5624_readable_register(codec,i))
 			continue;
 		data[0] = i;
 		data[1] = cache[i] >> 8;
@@ -1676,11 +1748,7 @@ static int alc5624_set_bias_level(struct snd_soc_codec *codec,
 	dev_dbg(codec->dev, "%s(): level: %d\n", __FUNCTION__,level);
 	
 	/* If already at that level, do not try it again */
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 	if (codec->dapm.bias_level == level)
-#else
-	if (codec->bias_level == level)
-#endif
 	{
 		return 0;
 	}
@@ -1729,22 +1797,17 @@ static int alc5624_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_STANDBY:
 	
 		/* If resuming operation from stop ... */
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF)
-#else
-		if (codec->bias_level == SND_SOC_BIAS_OFF)
-#endif
 		{
-		
-			/* Enable the codec MCLK */
-			clk_enable(alc5624->mclk);
-	
 			/* Reset the codec */
 			alc5624_reset(codec);
-			msleep(1);
+			msleep(10);
 		
 			/* Sync registers to cache */
 			alc5624_sync_cache(codec);
+			
+			/* Set the equalizer mode */
+			alc5624_update_eqmode(codec, alc5624->eq_setting);
 		}
 		
 		/* everything off except vref/vmid - Codec sys-clock from MCLK */
@@ -1753,11 +1816,7 @@ static int alc5624_set_bias_level(struct snd_soc_codec *codec,
 		snd_soc_update_bits(codec,ALC5624_PWR_MANAG_ADD2,0x3400,0x2000);
 		snd_soc_update_bits(codec,ALC5624_PD_CTRL_STAT,0x2F00,0x0300);
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF)
-#else
-		if (codec->bias_level == SND_SOC_BIAS_OFF)
-#endif
 		{
 			/* Enable fast Vref */
 			snd_soc_update_bits(codec, ALC5624_MISC_CTRL, 0x8000, 0x0000);
@@ -1779,17 +1838,10 @@ static int alc5624_set_bias_level(struct snd_soc_codec *codec,
 		snd_soc_update_bits(codec,ALC5624_PWR_MANAG_ADD2,0x3400,0x0000);
 		snd_soc_update_bits(codec,ALC5624_PD_CTRL_STAT,0x2F00,0x2F00);
 
-		/* Disable the codec MCLK */
-		clk_disable(alc5624->mclk);
-		
 		break;
 	}
 	
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 	codec->dapm.bias_level = level;
-#else
-	codec->bias_level = level;
-#endif
 	return 0;
 }
  
@@ -1805,20 +1857,16 @@ static int alc5624_set_bias_level(struct snd_soc_codec *codec,
 	SNDRV_PCM_FMTBIT_S24_LE)
 			
 static struct snd_soc_dai_ops alc5624_dai_ops = {
-		.startup		= alc5624_dai_startup,
-		.shutdown		= alc5624_dai_shutdown,
-		.hw_params 		= alc5624_pcm_hw_params,
-		.digital_mute 	= alc5624_digital_mute,
-		.set_fmt 		= alc5624_set_dai_fmt,
-		.set_sysclk 	= alc5624_set_dai_sysclk,
-		.set_pll 		= alc5624_set_dai_pll,
+	.startup		= alc5624_dai_startup,
+	.shutdown		= alc5624_dai_shutdown,
+	.hw_params 		= alc5624_pcm_hw_params,
+	.digital_mute 	= alc5624_digital_mute,
+	.set_fmt 		= alc5624_set_dai_fmt,
+	.set_sysclk 	= alc5624_set_dai_sysclk,
+	.set_pll 		= alc5624_set_dai_pll,
 };
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 static struct snd_soc_dai_driver alc5624_dai = {
-#else
-struct snd_soc_dai alc5624_dai = {
-#endif
 	.name = "alc5624-hifi",
 	.playback = {
 		.stream_name = "Playback",
@@ -1836,25 +1884,93 @@ struct snd_soc_dai alc5624_dai = {
 	.symmetric_rates = 1,
 }; 
 
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)
-EXPORT_SYMBOL_GPL(alc5624_dai);
-#endif
-
 /* Check if a register is volatile or not to forbid or not caching its value */
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 static int alc5624_volatile_register(struct snd_soc_codec *codec,
 	unsigned int reg)
-#else
-static int alc5624_volatile_register(unsigned int reg)
-#endif
 {
 	if (reg == ALC5624_PD_CTRL_STAT ||
 		reg == ALC5624_GPIO_PIN_STATUS ||
 		reg == ALC5624_OVER_TEMP_CURR_STATUS ||
 		reg == ALC5624_INDEX_DATA ||
-		reg == ALC5624_EQ_STATUS)
+		reg == ALC5624_EQ_STATUS ||
+		reg == ALC5624_RESET)
 		return 1;
 	return 0;
+}
+
+
+static int alc5624_readable_register(struct snd_soc_codec *codec,
+								unsigned int reg)
+{
+	switch (reg) {
+	case ALC5624_RESET:
+	case ALC5624_SPK_OUT_VOL:
+	case ALC5624_HP_OUT_VOL:
+	case ALC5624_PHONEIN_MONO_OUT_VOL:
+	case ALC5624_LINE_IN_VOL:
+	case ALC5624_STEREO_DAC_VOL:
+	case ALC5624_MIC_VOL:
+	case ALC5624_MIC_ROUTING_CTRL:
+	case ALC5624_ADC_REC_GAIN:
+	case ALC5624_ADC_REC_MIXER:
+	case ALC5624_OUTPUT_MIXER_CTRL:
+	case ALC5624_MIC_CTRL:
+	case ALC5624_PD_CTRL_STAT:
+	case ALC5624_MAIN_SDP_CTRL:
+	case ALC5624_PWR_MANAG_ADD1:
+	case ALC5624_PWR_MANAG_ADD2:
+	case ALC5624_PWR_MANAG_ADD3:
+	case ALC5624_GEN_CTRL_REG1:
+	case ALC5624_GEN_CTRL_REG2:
+	case ALC5624_PLL_CTRL:
+	case ALC5624_GPIO_PIN_CONFIG:
+	case ALC5624_GPIO_PIN_POLARITY:
+	case ALC5624_GPIO_PIN_STICKY:
+	case ALC5624_GPIO_PIN_WAKEUP:
+	case ALC5624_GPIO_PIN_STATUS:
+	case ALC5624_GPIO_PIN_SHARING:
+	case ALC5624_OVER_TEMP_CURR_STATUS:
+	case ALC5624_GPIO_OUT_CTRL:
+	case ALC5624_MISC_CTRL:
+	case ALC5624_STEREO_DAC_CLK_CTRL1:
+	case ALC5624_STEREO_DAC_CLK_CTRL2:
+	case ALC5624_PSEUDO_SPATIAL_CTRL:
+	case ALC5624_INDEX_ADDRESS:
+	case ALC5624_INDEX_DATA:
+	case ALC5624_EQ_STATUS:
+	case ALC5624_VENDOR_ID1:
+	case ALC5624_VENDOR_ID2:
+	case VIRTUAL_HPL_MIXER:
+	case VIRTUAL_HPR_MIXER:
+	case VIRTUAL_IDX_EQ_BAND0_COEFF:
+	case VIRTUAL_IDX_EQ_BAND0_GAIN:
+	case VIRTUAL_IDX_EQ_BAND1_COEFF0:
+	case VIRTUAL_IDX_EQ_BAND1_COEFF1:
+	case VIRTUAL_IDX_EQ_BAND1_GAIN:
+	case VIRTUAL_IDX_EQ_BAND2_COEFF0:
+	case VIRTUAL_IDX_EQ_BAND2_COEFF1:
+	case VIRTUAL_IDX_EQ_BAND2_GAIN:
+	case VIRTUAL_IDX_EQ_BAND3_COEFF0:
+	case VIRTUAL_IDX_EQ_BAND3_COEFF1:
+	case VIRTUAL_IDX_EQ_BAND3_GAIN:
+	case VIRTUAL_IDX_EQ_BAND4_COEFF:
+	case VIRTUAL_IDX_EQ_BAND4_GAIN:
+	case VIRTUAL_IDX_EQ_CTRL_STAT:
+	case VIRTUAL_IDX_EQ_INPUT_VOL:
+	case VIRTUAL_IDX_EQ_OUTPUT_VOL:
+	case VIRTUAL_IDX_AUTO_VOL_CTRL0:
+	case VIRTUAL_IDX_AUTO_VOL_CTRL1:
+	case VIRTUAL_IDX_AUTO_VOL_CTRL2:
+	case VIRTUAL_IDX_AUTO_VOL_CTRL3:
+	case VIRTUAL_IDX_AUTO_VOL_CTRL4:
+	case VIRTUAL_IDX_AUTO_VOL_CTRL5:
+	case VIRTUAL_IDX_DIG_INTERNAL:
+	case VIRTUAL_IDX_CLASS_D_TEMP_SENSOR:
+	case VIRTUAL_IDX_AD_DA_MIXER_INTERNAL:
+		return 1;
+	default:
+		return 0;
+	}
 }
 
 /* read alc5624 hw register */
@@ -1945,15 +2061,11 @@ static unsigned int alc5624_hw_read(struct snd_soc_codec *codec,
 static void alc5624_fill_cache(struct snd_soc_codec *codec)
 {
 	/*struct alc5624_priv *alc5624 = snd_soc_codec_get_drvdata(codec);*/
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)
-	int i, step = 1, size = REGISTER_COUNT;
-#else
 	int i, step = codec->driver->reg_cache_step, size = codec->driver->reg_cache_size;
-#endif
 	u16 *cache = codec->reg_cache;
 	for (i = 0 ; i < size ; i += step) {
-		/* Skip non implemented registers if non virtual */
-		if ((i & 1) && i < VIRTUAL_REG_FIRST) {
+		/* Skip unreadable registers */
+		if (!alc5624_readable_register(codec,i)) {
 			cache[i] = 0;
 			continue;
 		}
@@ -1961,32 +2073,17 @@ static void alc5624_fill_cache(struct snd_soc_codec *codec)
 	}
 }
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
+#ifdef CONFIG_PM
 static int alc5624_suspend(struct snd_soc_codec *codec, pm_message_t mesg)
 {
-#else
-static int alc5624_suspend(struct platform_device *pdev, pm_message_t mesg)
-{
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-	struct snd_soc_codec *codec = socdev->card->codec;
-#endif
 	dev_dbg(codec->dev, "%s()\n", __FUNCTION__);
-	
 	/* Go to off */
 	alc5624_set_bias_level(codec, SND_SOC_BIAS_OFF);
-	
 	return 0;
 }
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 static int alc5624_resume(struct snd_soc_codec *codec)
 {
-#else
-static int alc5624_resume(struct platform_device *pdev)
-{
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-	struct snd_soc_codec *codec = socdev->card->codec;
-#endif
 	dev_dbg(codec->dev, "%s()\n", __FUNCTION__);
 	
 	/* Go to standby */
@@ -1994,28 +2091,32 @@ static int alc5624_resume(struct platform_device *pdev)
 	return 0;
 }
 
+#else
+#define alc5624_suspend NULL
+#define alc5624_resume NULL
+#endif
+
 static int alc5624_probe(struct snd_soc_codec *codec)
 {
 	struct alc5624_priv *alc5624 = snd_soc_codec_get_drvdata(codec);
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)	
-	struct snd_soc_dapm_context *dapm = &codec->dapm;
-#endif
-	int ret,i;
+	int ret;
+	unsigned int i;
 	int spkratio;
 	int hpratio;
 	int mic1ratio;
 	int mic2ratio;
 	unsigned long reg;
+	int vid1, vid2, ver;
 
-	dev_dbg(codec->dev, "Coded is being probed\n");
-	
+	dev_info(codec->dev, "ALC5624 probe called\n");
+
 	/* Get the default read and write functions for this bus */
 	ret = snd_soc_codec_set_cache_io(codec, 8, 16, alc5624->control_type);
 	if (ret < 0) {
 		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
 		return ret;
 	}
-
+	
 	/* Get the original hw R/W functions */
 	alc5624->bus_hw_read = codec->hw_read;
 	alc5624->bus_hw_write = codec->hw_write;
@@ -2025,20 +2126,34 @@ static int alc5624_probe(struct snd_soc_codec *codec)
 	codec->hw_read = alc5624_hw_read;
 	codec->hw_write = alc5624_hw_write;
 	codec->control_data = alc5624;
-	
-	/* Enable the codec MCLK ... Otherwise, we can't read or write registers */
-	clk_enable(alc5624->mclk);
-	
+
 	/* Reset the codec */
 	alc5624_reset(codec);
-	msleep(1);
+	msleep(10);
 
+	/* Read chip ids */
+	vid1 = alc5624_hw_read(codec, ALC5624_VENDOR_ID1);
+	vid2 = alc5624_hw_read(codec, ALC5624_VENDOR_ID2);
+	ver  = (vid2 & 0xff);		/* Version */
+	vid2 = (vid2 >> 8) & 0xff; 	/* Device */
+	alc5624->id = vid2;
+	
+	if (vid1 != 0x10ec) {
+		dev_err(codec->dev, "unknown or wrong codec - Expected %x, got %x [%x]\n",
+				0x10ec,	vid1, vid2);
+		return -ENODEV;
+	}
+
+	dev_dbg(codec->dev, "Found codec id : alc5624, Version: %d\n", ver);	
+	
 	/* Fill cache with the default register values after reset*/
 	alc5624_fill_cache(codec);
-
+	
 	/* Modify the default values to properly config the CODEC */
-	for (i = 0; i < ARRAY_SIZE(alc5624_reg_default); i++) {
-		snd_soc_write(codec,alc5624_reg_default[i].reg,alc5624_reg_default[i].val);
+	for (i = 2; i < ARRAY_SIZE(alc5624_reg_default); i+=2) {
+		if (!alc5624_readable_register(codec,i))
+			continue;
+		snd_soc_write(codec,i,alc5624_reg_default[i]);
 	}
 	
 	/* Configure amplifier bias ratio voltages based on voltage supplies */
@@ -2108,26 +2223,12 @@ static int alc5624_probe(struct snd_soc_codec *codec)
 	snd_soc_update_bits(codec, ALC5624_ADC_REC_MIXER, 0x6060, 
 		(alc5624->default_is_mic2) ? 0x4040 : 0x2020 );
 	
-	/* Disable the codec MCLK */
-	clk_disable(alc5624->mclk);
+	/* Set the equalizer mode */
+	alc5624_update_eqmode(codec, alc5624->eq_setting);
 	
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
-	/* On linux 2.6.38+ we need to register controls here */
-	snd_soc_add_controls(codec, alc5624_snd_controls,
-					ARRAY_SIZE(alc5624_snd_controls));
+	codec->dapm.bias_level = SND_SOC_BIAS_STANDBY;
 
-	snd_soc_dapm_new_controls(dapm, alc5624_dapm_widgets,
-					ARRAY_SIZE(alc5624_dapm_widgets));
-
-	/* set up audio path interconnects */
-	snd_soc_dapm_add_routes(dapm, audio_map, ARRAY_SIZE(audio_map));
-	
-	/* make sure to register the dapm widgets */
-	snd_soc_dapm_new_widgets(dapm);
-	
-#endif
-	
-	return ret;
+	return 0;
 }
 
 /* power down chip */
@@ -2137,35 +2238,33 @@ static int alc5624_remove(struct snd_soc_codec *codec)
 	return 0;
 }
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36)
 static struct snd_soc_codec_driver soc_codec_device_alc5624 = {
 	.probe 				= alc5624_probe,
 	.remove 			= alc5624_remove,
 	.suspend 			= alc5624_suspend,
 	.resume 			= alc5624_resume,
 	.volatile_register 	= alc5624_volatile_register,
+	.readable_register  = alc5624_readable_register,
 	.set_bias_level 	= alc5624_set_bias_level,
 	.reg_cache_size 	= REGISTER_COUNT,
 	.reg_word_size 		= sizeof(u16),
 	.reg_cache_step 	= 1, /* Only used to display registers - virtual regs use step 1*/
+	.reg_cache_default  = alc5624_reg_default,
+	.controls = alc5624_snd_controls,
+	.num_controls = ARRAY_SIZE(alc5624_snd_controls),
+	.dapm_widgets = alc5624_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(alc5624_dapm_widgets),
+	.dapm_routes = alc5624_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(alc5624_dapm_routes),
 };
-#endif
 
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)	
-static struct snd_soc_codec *alc5624_codec = NULL;
-#endif
 
 static __devinit int alc5624_i2c_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	struct alc5624_platform_data *pdata;
 	struct alc5624_priv *alc5624;
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)		
-	struct snd_soc_codec *codec;
-#endif
-	struct clk* mclk;
-	
-	int ret, vid1, vid2, ver;
+	int ret;
 
 	pdata = client->dev.platform_data;
 	if (!pdata) {
@@ -2173,63 +2272,12 @@ static __devinit int alc5624_i2c_probe(struct i2c_client *client,
 		return -ENODEV;
 	}
 	
-	/* Get the MCLK */
-	mclk = clk_get(NULL, pdata->mclk);
-	if (IS_ERR(mclk)) {
-		dev_err(&client->dev, "Unable to get MCLK\n");
-		return -ENODEV;
-	} 
-	
-	/* Enable it to be able to access codec registers */
-	clk_enable(mclk);
-	
-	/* Read chip ids */
-	vid1 = i2c_smbus_read_word_data(client, ALC5624_VENDOR_ID1);
-	if (vid1 < 0) {
-		dev_err(&client->dev, "failed to read I2C\n");
-		clk_disable(mclk);
-		clk_put(mclk);
-		return -EIO;
-	}
-	vid1 = ((vid1 & 0xff) << 8) | (vid1 >> 8);
-
-	vid2 = i2c_smbus_read_word_data(client, ALC5624_VENDOR_ID2);
-	if (vid2 < 0) {
-		dev_err(&client->dev, "failed to read I2C\n");
-		clk_disable(mclk);
-		clk_put(mclk);
-		return -EIO;
-	}
-	
-	/* Disable the clock */
-	clk_disable(mclk);
-	
-	ver  = (vid2 >> 8) & 0xff;	/* Version */
-	vid2 = (vid2 & 0xff); 		/* Device */
-
-	if ((vid1 != 0x10ec) || (vid2 != id->driver_data)) {
-		dev_err(&client->dev, "unknown or wrong codec\n");
-		dev_err(&client->dev, "Expected %x:%lx, got %x:%x\n",
-				0x10ec, id->driver_data,
-				vid1, vid2);
-		clk_put(mclk);
-		return -ENODEV;
-	}
-
-	dev_dbg(&client->dev, "Found codec id : alc5624, Version: %d\n", ver);
-
-	alc5624 = kzalloc(sizeof(struct alc5624_priv), GFP_KERNEL);
+	alc5624 = devm_kzalloc(&client->dev, sizeof(struct alc5624_priv), GFP_KERNEL);
 	if (alc5624 == NULL) {
 		dev_err(&client->dev, "no memory for context\n");
-		clk_put(mclk);
 		return -ENOMEM;
 	}
 
-	alc5624->id = vid2;
-	
-	/* Store the MCLK clock handle */
-	alc5624->mclk = mclk; 
-	
 	/* Store the supply voltages used for amplifiers */
 	alc5624->avdd_mv = pdata->avdd_mv ? pdata->avdd_mv : 3300;						/* Analog vdd in millivolts */
 	alc5624->spkvdd_mv = pdata->spkvdd_mv ? pdata->spkvdd_mv : alc5624->avdd_mv;	/* Speaker Vdd in millivolts */
@@ -2247,97 +2295,19 @@ static __devinit int alc5624_i2c_probe(struct i2c_client *client,
 	alc5624->control_data = client;
 	alc5624->control_type = SND_SOC_I2C;
 
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)	
-	/* linux 2.6.36 version setup is quite by hand */
-
-	codec = &alc5624->codec;
-	snd_soc_codec_set_drvdata(codec, alc5624);
-
-	mutex_init(&codec->mutex);
-	INIT_LIST_HEAD(&codec->dapm_widgets);
-	INIT_LIST_HEAD(&codec->dapm_paths);
-
-	codec->name = "ALC5624";
-	codec->owner = THIS_MODULE;
-	codec->control_data = client;	
-	codec->bias_level = SND_SOC_BIAS_OFF;
-	codec->set_bias_level = alc5624_set_bias_level;	
-	codec->dai = &alc5624_dai;
-	codec->num_dai = 1;
-	codec->reg_cache_size = REGISTER_COUNT;
-	codec->reg_cache = &alc5624->reg_cache[0];
-	codec->volatile_register = alc5624_volatile_register;	
-	codec->idle_bias_off = 1;
-	
-	codec->dev = &client->dev;
-	alc5624_dai.dev = &client->dev;
-	alc5624_codec = codec; /* so later probe can attach the codec to the card */
-	
-	/* call the codec probe function */
-	ret = alc5624_probe(codec);
-	if (ret != 0) {
-		dev_err(&client->dev, "Failed to probe codec: %d\n", ret);	
-		clk_put(mclk);
-		kfree(alc5624);
-		return ret;
-	}
-	
-
-	ret = snd_soc_register_codec(codec);
-	if (ret != 0) {
-		dev_err(&client->dev, "Failed to register codec: %d\n", ret);	
-		clk_put(mclk);
-		kfree(alc5624);
-		return ret;
-	}
-
-	ret = snd_soc_register_dai(&alc5624_dai);
-	if (ret != 0) {
-		dev_err(&client->dev, "Failed to register DAI: %d\n", ret);	
-		snd_soc_unregister_codec(codec);
-		clk_put(mclk);
-		kfree(alc5624);
-		return ret;
-	}
-	
-#else
-	/* linux 2.6.38 setup is very streamlined :) */
 	ret = snd_soc_register_codec(&client->dev,
 		&soc_codec_device_alc5624, &alc5624_dai, 1);
 	if (ret != 0) {
 		dev_err(&client->dev, "Failed to register codec: %d\n", ret);
-		clk_put(mclk);
-		kfree(alc5624);
 	}
-#endif
 
 	return ret;
 }
 
 static __devexit int alc5624_i2c_remove(struct i2c_client *client)
 {
-	struct alc5624_priv *alc5624 = i2c_get_clientdata(client);
-
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)	
-	/* linux 2.6.36 version device removal is quite by hand */
-	
-	alc5624_remove(&alc5624->codec);
-	
-	snd_soc_unregister_dai(&alc5624_dai);
-	snd_soc_unregister_codec(&alc5624->codec);
-
-	alc5624_dai.dev = NULL;
-	alc5624_codec = NULL;
-
-#else
-	/* linux 2.6.38 device removal is very streamlined :) */
+	/*struct alc5624_priv *alc5624 = i2c_get_clientdata(client);*/
 	snd_soc_unregister_codec(&client->dev);
-	
-#endif
-	/* Release clock */
-	clk_put(alc5624->mclk);
-	
-	kfree(alc5624);
 	return 0;
 }
 
@@ -2357,63 +2327,6 @@ static struct i2c_driver alc5624_i2c_driver = {
 	.remove =  __devexit_p(alc5624_i2c_remove),
 	.id_table = alc5624_i2c_table,
 };
-
-#if LINUX_VERSION_CODE == KERNEL_VERSION(2,6,36)	
-static int alc5624_plat_probe(struct platform_device *pdev)
-{
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-	int ret = 0;
-
-	if (!alc5624_codec) {
-		dev_err(&pdev->dev, "I2C client not yet instantiated\n");
-		return -ENODEV;
-	}
-
-	/* Associate the codec to the card */
-	socdev->card->codec = alc5624_codec;
-
-	/* Register pcms */
-	ret = snd_soc_new_pcms(socdev, SNDRV_DEFAULT_IDX1, SNDRV_DEFAULT_STR1);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to register new PCMs\n");
-	}
-
-	/* Register the controls and widgets */
-	snd_soc_add_controls(alc5624_codec, alc5624_snd_controls,
-					ARRAY_SIZE(alc5624_snd_controls));
-
-	snd_soc_dapm_new_controls(alc5624_codec, alc5624_dapm_widgets,
-					ARRAY_SIZE(alc5624_dapm_widgets));
-
-	/* set up audio path interconnects */
-	snd_soc_dapm_add_routes(alc5624_codec, audio_map, ARRAY_SIZE(audio_map));
-	
-	/* make sure to register the dapm widgets */
-	snd_soc_dapm_new_widgets(alc5624_codec);
-	
-	return ret;
-}
-
-/* power down chip */
-static int alc5624_plat_remove(struct platform_device *pdev)
-{
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-
-	/* Release PCMs and DAPM controls */
-	snd_soc_free_pcms(socdev);
-	snd_soc_dapm_free(socdev);
-
-	return 0;
-}
-
-struct snd_soc_codec_device soc_codec_dev_alc5624 = {
-	.probe = 	alc5624_plat_probe,
-	.remove = 	alc5624_plat_remove,
-	.suspend = 	alc5624_suspend,
-	.resume =	alc5624_resume,
-};
-EXPORT_SYMBOL_GPL(soc_codec_dev_alc5624);
-#endif
 
 static int __init alc5624_modinit(void)
 {

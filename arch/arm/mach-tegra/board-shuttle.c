@@ -32,7 +32,11 @@
 #include <linux/reboot.h>
 #include <linux/i2c-tegra.h>
 #include <linux/memblock.h>
+#include <linux/regulator/machine.h>
+#include <linux/regulator/fixed.h>
+#include <linux/regulator/virtual_adj.h>
 #include <linux/regulator/consumer.h>
+
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
